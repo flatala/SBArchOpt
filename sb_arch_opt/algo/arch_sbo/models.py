@@ -44,6 +44,7 @@ try:
     from smt.surrogate_models.kpls import KPLS
     from smt.surrogate_models.krg_based import MixIntKernelType, MixHrcKernelType
     from smt.surrogate_models.rbf import RBF
+    from surrogates import GraphKernelKRG
 
     try:
         from smt.utils.design_space import BaseDesignSpace
@@ -210,6 +211,47 @@ class ModelFactory:
 
         if ignore_hierarchy or kpls_n_comp is not None:
             surrogate.supports['x_hierarchy'] = False
+
+        if multi:
+            surrogate = MultiSurrogateModel(surrogate)
+
+        return surrogate, normalization
+
+    def get_md_graph_kernel_kriging_model(
+            self,
+            graph_kernel,
+            kpls_n_comp: int = None,
+            multi: bool = True,
+            ignore_hierarchy: bool = False,
+            **kwargs_,
+    ) -> Tuple["SurrogateModel", "Normalization"]:
+        check_dependencies()
+
+        normalization = self.get_md_normalization()
+        design_space = self.problem.design_space
+        norm_ds_spec = self.create_smt_design_space_spec(
+            design_space, md_normalize=True, ignore_hierarchy=ignore_hierarchy
+        )
+
+        kwargs = dict(
+            print_global=False,
+            design_space=norm_ds_spec.design_space,
+            categorical_kernel=MixIntKernelType.GOWER,
+            hierarchical_kernel=MixHrcKernelType.ALG_KERNEL,
+        )
+
+        kwargs.update(kwargs_)
+        # ehh why is this unresolved?
+        gp = self.problem.evaluator.translator.graph_processor
+        surrogate = GraphKernelKRG(
+            graph_processor=gp,
+            normalization=normalization,
+            graph_kernel=graph_kernel,
+            **kwargs,
+        )
+
+        if ignore_hierarchy or kpls_n_comp is not None:
+            surrogate.supports["x_hierarchy"] = False
 
         if multi:
             surrogate = MultiSurrogateModel(surrogate)
