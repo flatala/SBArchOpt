@@ -235,7 +235,7 @@ class ModelFactory:
         )
 
         kwargs = dict(
-            print_global=False,
+            print_global=True,
             design_space=norm_ds_spec.design_space,
             categorical_kernel=MixIntKernelType.GOWER,
             hierarchical_kernel=MixHrcKernelType.ALG_KERNEL,
@@ -247,7 +247,7 @@ class ModelFactory:
         assert(self.problem.evaluator != None)
         gp = self.problem.evaluator.translator.graph_processor
 
-        print("initializing the graphkernels surogate")
+        print("initializing the graph kernel surogate\n")
         surrogate = GraphKernelKRG(
             graph_processor=gp,
             normalization=normalization,
@@ -456,11 +456,6 @@ class MultiSurrogateModel(SurrogateModel):
         for i, model in enumerate(self._models):
             if i > 0 and isinstance(model, KrgBased) and theta0 is not None:
                 model.options['theta0'] = theta0
-
-            # TODO: remove - debug print
-            print("TRAIN model", i, "type=", type(model), "id=", id(model),
-                  "is_continuous=", getattr(model, "is_continuous", None),
-                  "matrix_data_corr=", model._matrix_data_corr.__qualname__)
 
             model.train()
 

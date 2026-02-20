@@ -133,7 +133,6 @@ class GraphKernelKRG(KRG):
         x=None,
         kplsk_second_loop=False,
     ):
-        raise RuntimeError("_matrix_data_corr called")
         X = self.training_points[None][0][0]
 
         _, ij = cross_distances(X)
