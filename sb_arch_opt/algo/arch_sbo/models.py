@@ -29,6 +29,8 @@ from typing import *
 from dataclasses import dataclass
 import pymoo.core.variable as var
 from pymoo.core.problem import Problem
+
+from adore.optimization.bridge.problem import AdoreArchOptProblem
 from sb_arch_opt.problem import ArchOptProblemBase
 from sb_arch_opt.design_space import ArchDesignSpace
 from sb_arch_opt.sampling import HierarchicalSampling
@@ -44,7 +46,7 @@ try:
     from smt.surrogate_models.kpls import KPLS
     from smt.surrogate_models.krg_based import MixIntKernelType, MixHrcKernelType
     from smt.surrogate_models.rbf import RBF
-    from surrogates import GraphKernelKRG
+    from .surrogates import GraphKernelKRG # fo now lets do a local import like this
 
     try:
         from smt.utils.design_space import BaseDesignSpace
@@ -219,8 +221,7 @@ class ModelFactory:
 
     def get_md_graph_kernel_kriging_model(
             self,
-            graph_kernel,
-            kpls_n_comp: int = None,
+            graph_kernel = None, # not really used for now
             multi: bool = True,
             ignore_hierarchy: bool = False,
             **kwargs_,
@@ -241,8 +242,12 @@ class ModelFactory:
         )
 
         kwargs.update(kwargs_)
-        # ehh why is this unresolved?
+        # NOTE: If it's an AdoreArchOptProblem it will have an evaluator!!
+        # TODO: check if this is always teh case etc
+        assert(self.problem.evaluator != None)
         gp = self.problem.evaluator.translator.graph_processor
+
+        print("initializing the graphkernels surogate")
         surrogate = GraphKernelKRG(
             graph_processor=gp,
             normalization=normalization,
@@ -250,8 +255,15 @@ class ModelFactory:
             **kwargs,
         )
 
-        if ignore_hierarchy or kpls_n_comp is not None:
+        if ignore_hierarchy:
             surrogate.supports["x_hierarchy"] = False
+
+        print("GraphKernelKRG type:", type(surrogate))
+        print("is_continuous:", surrogate.is_continuous)
+        print("design_space type:", type(surrogate.design_space))
+        print("has categorical:", np.any(surrogate.design_space.is_cat_mask))
+        print("categorical_kernel:", surrogate.options["categorical_kernel"])
+        print("matrix_data_corr qualname:", surrogate._matrix_data_corr.__qualname__)
 
         if multi:
             surrogate = MultiSurrogateModel(surrogate)
@@ -444,6 +456,11 @@ class MultiSurrogateModel(SurrogateModel):
         for i, model in enumerate(self._models):
             if i > 0 and isinstance(model, KrgBased) and theta0 is not None:
                 model.options['theta0'] = theta0
+
+            # TODO: remove - debug print
+            print("TRAIN model", i, "type=", type(model), "id=", id(model),
+                  "is_continuous=", getattr(model, "is_continuous", None),
+                  "matrix_data_corr=", model._matrix_data_corr.__qualname__)
 
             model.train()
 
