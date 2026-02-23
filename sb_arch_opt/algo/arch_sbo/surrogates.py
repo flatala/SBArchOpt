@@ -9,8 +9,6 @@ from grakel.kernels import WeisfeilerLehman, VertexHistogram
 from adore.graph import FunctionNode
 from adsg_core import DSGType
 
-
-# Maybe it would make sense to just integrate the output o a kernl into the design vector???
 class GraphKernelKRG(KRG):
     """
     KRG where correlation is computed via a graph kernel on graphs built from design vectors.
@@ -111,46 +109,57 @@ class GraphKernelKRG(KRG):
         self._dv_to_graph[tuple(dv_corr)] = gk_graph
         return gk_graph
 
-    def _get_node_label(self, node):
-        cls = type(node)
-        try:
-            return self._node_type_label_dict[cls]
-        except KeyError as e:
-            raise KeyError(f"No label registered for {cls.__module__}.{cls.__qualname__}") from e
+    # def _get_node_label(self, node):
+    #     cls = type(node)
+    #     try:
+    #         return self._node_type_label_dict[cls]
+    #     except KeyError as e:
+    #         raise KeyError(f"No label registered for {cls.__module__}.{cls.__qualname__}") from e
 
     def _matrix_data_corr(
         self,
-        corr,
+        corr, # type of correlation model
         design_space,
         power,
-        theta,
+        theta, # hyperpaams of teh correlation model
         theta_bounds,
-        dx,
+        dx, # tensor pf gower componentwise distances betweens samples
         Lij=None,
-        n_levels=None,
-        cat_features=None,
+        n_levels=None, # levels for every cat variable
+        cat_features=None, # indices of cat variables
         cat_kernel=None,
-        x=None,
+        x=None, # in[ut instead of dx for homo_hs prediction???
         kplsk_second_loop=False,
     ):
-        X = self.training_points[None][0][0]
+        X_train = self.training_points[None][0][0]
+        n_train = X_train.shape[0]
 
-        _, ij = cross_distances(X)
+        # get networkX graphs
+        train_graphs = [self._get_graph_for_xnorm(X_train[i]) for i in range(n_train)]
 
-        graphs = [self._get_graph_for_xnorm(X[i]) for i in range(X.shape[0])]
+        # array of (i, j) pairs of len n * (n - 1) / 2
+        _, ij_train = cross_distances(X_train)
 
-        # calculate kernel
-        wl = WeisfeilerLehman(n_iter=3, base_graph_kernel=VertexHistogram)
-        K = wl.fit_transform(graphs)
+        # fit and calculate train-tain kernel K(X, X) - this is super inefficient for now, wi double fit it but whatever for now
+        wl = WeisfeilerLehman(n_iter=3, base_graph_kernel=VertexHistogram, normalize=True)
+        K_train_train = wl.fit_transform(train_graphs)
 
-        diag = np.clip(np.diag(K), 1e-30, None)
-        inv_sqrt_d = 1.0 / np.sqrt(diag)
+        if x is None:
+            ij = ij_train
+            K = K_train_train
+            r = np.empty((ij.shape[0], 1), dtype=float)
 
-        # Gram matrix needs to be PSD, so we normalize as K_norm = D^{-1/2} K D^{-1/2}, this preserves PSD
-        K_norm = (K * inv_sqrt_d[None, :]) * inv_sqrt_d[:, None]
-        K_norm = 0.5 * (K_norm + K_norm.T)
-        r = np.empty((ij.shape[0], 1), dtype=float)
-        for k, (i, j) in enumerate(ij):
-            r[k, 0] = float(K_norm[i, j])
+            # put the values form the matrix in an array
+            for k, (i, j) in enumerate(ij):
+                r[k, 0] = float(K[i, j])
 
-        return r
+            return r
+
+        x = np.asarray(x, dtype=float)
+        n_eval = x.shape[0]
+
+        # based on fitted kernel on train points, get the test-train point covariances K(X*, X)
+        test_graphs = [self._get_graph_for_xnorm(x[i]) for i in range(n_eval)]
+        K_x_train = wl.transform(test_graphs)
+
+        return K_x_train.reshape(-1, 1)

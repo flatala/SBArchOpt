@@ -235,7 +235,7 @@ class ModelFactory:
         )
 
         kwargs = dict(
-            print_global=True,
+            print_global=False,
             design_space=norm_ds_spec.design_space,
             categorical_kernel=MixIntKernelType.GOWER,
             hierarchical_kernel=MixHrcKernelType.ALG_KERNEL,
