@@ -46,7 +46,7 @@ try:
     from smt.surrogate_models.kpls import KPLS
     from smt.surrogate_models.krg_based import MixIntKernelType, MixHrcKernelType
     from smt.surrogate_models.rbf import RBF
-    from .surrogates import GraphKernelKRG # fo now lets do a local import like this
+    from .surrogates import GraphKernelKRG, GraphKernelBuilder  # fo now lets do a local import like this
 
     try:
         from smt.utils.design_space import BaseDesignSpace
@@ -221,7 +221,7 @@ class ModelFactory:
 
     def get_md_graph_kernel_kriging_model(
             self,
-            graph_kernel = None, # not really used for now
+            kernel_builder: GraphKernelBuilder,
             multi: bool = True,
             ignore_hierarchy: bool = False,
             **kwargs_,
@@ -251,7 +251,7 @@ class ModelFactory:
         surrogate = GraphKernelKRG(
             graph_processor=gp,
             normalization=normalization,
-            graph_kernel=graph_kernel,
+            kernel_builder=kernel_builder,
             **kwargs,
         )
 

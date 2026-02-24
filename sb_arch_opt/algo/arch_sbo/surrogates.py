@@ -1,13 +1,29 @@
-# --- 1) custom surrogate: GraphKernelKRG ------------------------------------
-import networkx as nx
-import numpy as np
 from smt.surrogate_models import KRG
 from smt.utils.kriging import cross_distances
-import grakel as gk
 from grakel.kernels import WeisfeilerLehman, VertexHistogram
-
-from adore.graph import FunctionNode
 from adsg_core import DSGType
+from adsg_core.optimization.graph_processor import GraphProcessor
+from pymoo.util.normalization import Normalization
+
+import grakel as gk
+import networkx as nx
+import numpy as np
+
+from abc import ABC, abstractmethod
+from typing import Any, Sequence
+
+class GraphKernelBuilder(ABC):
+    @abstractmethod
+    def build_graph(self, G: DSGType) -> Any:
+        """Create the graph object used by the kernel (e.g., a GraKeL graph)."""
+
+    @abstractmethod
+    def fit_transform(self, train_graphs: Sequence[Any]) -> Any:
+        """Return K_train_train (n_train x n_train) and store fitted state internally."""
+
+    @abstractmethod
+    def transform(self, test_graphs: Sequence[Any]) -> Any:
+        """Return K_test_train (n_test x n_train) using stored fitted state."""
 
 class GraphKernelKRG(KRG):
     """
@@ -24,142 +40,120 @@ class GraphKernelKRG(KRG):
 
     def __init__(
         self,
-        graph_processor,
-        normalization,
-        graph_kernel=None, # For now we dont use it / should be
+        graph_processor: GraphProcessor,
+        normalization: Normalization,
+        kernel_builder: GraphKernelBuilder,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        print("GraphKernelKRG init id:", id(self))
         self.gp = graph_processor
         self.norm = normalization
-        self.graph_kernel = graph_kernel
-
-        # DV -> graph cache
-        self._dv_to_graph = {}
-
-        # graph kernels have no gradients
+        self.kernel_builder = kernel_builder
+        self._raw_to_corr: dict[tuple, tuple] = {}
+        self._corr_to_graph: dict[tuple, Any] = {}
+        self.K_train_train = None
         self.options["hyper_opt"] = "Cobyla"
 
-        # TODO - This could be in principle some mapping object that is passed to the odel or sth, not a dict
-        #  / think abt some kernel data extractor + computation interface
-        # self._node_type_label_dict = {
-        #
-        # }
-
-    # def _xnorm_to_raw_dv(self, x_row_norm):
-    #
-    #     ds = self.norm._design_space
-    #
-    #     print("design_space object:", ds)
-    #     print("design_space type:", type(ds))
-    #     print("xl type:", type(ds.xl), "xu type:", type(ds.xu))
-    #
-    #     import inspect
-    #     print("xl defined on class as:", type(getattr(type(ds), "xl", None)))
-    #
-    #     return self.norm.backward(np.asarray(x_row_norm, dtype=float))
-
-    def _xnorm_to_raw_dv(self, x_row_norm):
+    def _x_norm_to_raw_dv(self, x_row_norm):
         x2d = np.asarray(x_row_norm, dtype=float).ravel()[None, :]  # shape (1, n_var)
         raw2d = self.norm.backward(x2d)  # shape (1, n_var)
         return raw2d[0]
 
-    def _get_graph_for_xnorm(self, x_row_norm):
-        raw_dv = self._xnorm_to_raw_dv(x_row_norm)
+    def _get_graph_for_x_norm(self, x_row_norm) -> Any:
+        # Unnormalize the design vector
+        raw_dv = self._x_norm_to_raw_dv(x_row_norm)
 
-        # First without creating the graph to ony get the corrected
-        # dv and check if we have a cache hit.
-        _, dv_corr, active = self.gp.get_graph(raw_dv, create=False)
-        key = tuple(dv_corr)
+        # Check if this raw_dv was encountered
+        raw_key = tuple(raw_dv)
+        dv_corr = self._raw_to_corr.get(raw_key)
 
-        # check for cache hit
-        g = self._dv_to_graph.get(key)
-        if g is not None:
-            return g
+        # If raw_dv was not encountered, correct the dv
+        # Also add the raw -> corr cache entry
+        if dv_corr is None:
+            _, dv_corr_arr, _ = self.gp.get_graph(raw_dv, create=False)
+            dv_corr = tuple(dv_corr_arr)
+            self._raw_to_corr[raw_key] = dv_corr
 
-        # create graph once
-        g , _, _ = self.gp.get_graph(dv_corr, create=True)
+        # Check if a graph for the corrected dv was already created
+        built_graph = self._corr_to_graph.get(dv_corr)
+        if built_graph is not None:
+            return built_graph
 
-        # nxMultiDiGraph
-        G = g.graph
+        # Create the graph
+        g, _, _ = self.gp.get_graph(np.asarray(dv_corr, dtype=float), create=True)
+        built_graph = self.kernel_builder.build_graph(g)
 
-        # TODO: make sure this gets collapsed right (ie if we have two parallel edges we egt a 2 in the adjacency)
-        nodes = list(G.nodes())
-        # edges = G.edges - unused for now
-        A = nx.to_numpy_array(G, nodelist=nodes, weight="weight")
-        node_labels = {i: 0 for i in range(len(nodes))}
+        # Cache the resulting graph
+        self._corr_to_graph[dv_corr] = built_graph
 
-        # TODO - implement this properly, using fixed label for all nodes for now
-        # we need ot assign labels, for now let's do it by adsg node types
-        # function node -> comp -> etc
-        # The idea is to assign a higher integer to a higher level node type
-        # node_labels = []
-        # for node in nodes:
-        #     if node is FunctionNode:
-        #         label = self._get_node_label(node)
-        #         node_labels.append(label)
+        return built_graph
 
-        # TODO - we also might want edge labels for some kernels. Maybe we could provide some extractor
-        #  objects with a kernel to combine extraction and kernel calculation
-        # edge_labels = []
-
-        # build and cache the grakel graph
-        gk_graph = gk.Graph(A, node_labels=node_labels)
-        self._dv_to_graph[tuple(dv_corr)] = gk_graph
-        return gk_graph
-
-    # def _get_node_label(self, node):
-    #     cls = type(node)
-    #     try:
-    #         return self._node_type_label_dict[cls]
-    #     except KeyError as e:
-    #         raise KeyError(f"No label registered for {cls.__module__}.{cls.__qualname__}") from e
+    def _new_train(self):
+        # Reset the matrix and ij so the model gets fitted again
+        self._ij_train = None
+        self.K_train_train = None
+        super()._new_train()
 
     def _matrix_data_corr(
         self,
-        corr, # type of correlation model
+        corr,
         design_space,
         power,
-        theta, # hyperpaams of teh correlation model
+        theta,
         theta_bounds,
-        dx, # tensor pf gower componentwise distances betweens samples
+        dx,
         Lij=None,
-        n_levels=None, # levels for every cat variable
-        cat_features=None, # indices of cat variables
+        n_levels=None,
+        cat_features=None,
         cat_kernel=None,
-        x=None, # in[ut instead of dx for homo_hs prediction???
+        x=None,
         kplsk_second_loop=False,
     ):
         X_train = self.training_points[None][0][0]
-        n_train = X_train.shape[0]
 
-        # get networkX graphs
-        train_graphs = [self._get_graph_for_xnorm(X_train[i]) for i in range(n_train)]
-
-        # array of (i, j) pairs of len n * (n - 1) / 2
-        _, ij_train = cross_distances(X_train)
-
-        # fit and calculate train-tain kernel K(X, X) - this is super inefficient for now, wi double fit it but whatever for now
-        wl = WeisfeilerLehman(n_iter=3, base_graph_kernel=VertexHistogram, normalize=True)
-        K_train_train = wl.fit_transform(train_graphs)
+        if self.K_train_train is None:
+            _, self._ij_train = cross_distances(X_train)
+            n_train = X_train.shape[0]
+            # Get built graph instances
+            train_graphs = [self._get_graph_for_x_norm(X_train[i]) for i in range(n_train)]
+            K = self.kernel_builder.fit_transform(train_graphs)
+            self.K_train_train = K
 
         if x is None:
-            ij = ij_train
-            K = K_train_train
+            # Array of (i, j) pairs of len n * (n - 1) / 2
+            ij = self._ij_train
             r = np.empty((ij.shape[0], 1), dtype=float)
-
-            # put the values form the matrix in an array
+            # Put the values form the matrix in an array
             for k, (i, j) in enumerate(ij):
-                r[k, 0] = float(K[i, j])
-
+                r[k, 0] = float(self.K_train_train[i, j])
             return r
 
+        # Based on fitted kernel on train points, we get the test-train point covariances K(X*, X)
         x = np.asarray(x, dtype=float)
         n_eval = x.shape[0]
-
-        # based on fitted kernel on train points, get the test-train point covariances K(X*, X)
-        test_graphs = [self._get_graph_for_xnorm(x[i]) for i in range(n_eval)]
-        K_x_train = wl.transform(test_graphs)
-
+        test_graphs = [self._get_graph_for_x_norm(x[i]) for i in range(n_eval)]
+        K_x_train = self.kernel_builder.transform(test_graphs)
+        assert K_x_train.shape == (n_eval, X_train.shape[0])
         return K_x_train.reshape(-1, 1)
+
+class SimpleWLKernelBuilder(GraphKernelBuilder):
+    def __init__(self):
+        self.kernel = WeisfeilerLehman(n_iter=3, base_graph_kernel=VertexHistogram, normalize=True)
+
+    def build_graph(self, G: DSGType) -> Any:
+        # noinspection PyTypeChecker
+        G_nx: nx.MultiDiGraph = G.graph
+        nodes = list(G_nx.nodes())
+        A = nx.to_numpy_array(G_nx, nodelist=nodes, weight="weight")
+        node_labels = {i: 0 for i in range(len(nodes))}
+        gk_graph = gk.Graph(A, node_labels=node_labels)
+        return gk_graph
+
+    def fit_transform(self, train_graphs: Sequence[Any]) -> Any:
+        print("fitting kernel")
+        K_train_train = self.kernel.fit_transform(train_graphs)
+        return K_train_train
+
+    def transform(self, test_graphs: Sequence[Any]) -> Any:
+        K_x_train = self.kernel.transform(test_graphs)
+        return K_x_train
