@@ -150,7 +150,6 @@ class SimpleWLKernelBuilder(GraphKernelBuilder):
         return gk_graph
 
     def fit_transform(self, train_graphs: Sequence[Any]) -> Any:
-        print("fitting kernel")
         K_train_train = self.kernel.fit_transform(train_graphs)
         return K_train_train
 

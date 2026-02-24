@@ -242,9 +242,6 @@ class ModelFactory:
         )
 
         kwargs.update(kwargs_)
-        # NOTE: If it's an AdoreArchOptProblem it will have an evaluator!!
-        # TODO: check if this is always teh case etc
-        assert(self.problem.evaluator != None)
         gp = self.problem.evaluator.translator.graph_processor
 
         print("initializing the graph kernel surogate\n")
