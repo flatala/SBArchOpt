@@ -156,3 +156,40 @@ class SimpleWLKernelBuilder(GraphKernelBuilder):
     def transform(self, test_graphs: Sequence[Any]) -> Any:
         K_x_train = self.kernel.transform(test_graphs)
         return K_x_train
+
+# TODO: finish up, make teh assignment to integers make sense in terms of the hierarchy between nodes
+class WLVHKernelBuilder(GraphKernelBuilder):
+    def __init__(self):
+        self.kernel = WeisfeilerLehman(n_iter=3, base_graph_kernel=VertexHistogram, normalize=True)
+        self._class_name_to_label = {name: i for i, name in enumerate(['ADSGNode', 'FunctionNode', 'ComponentNode', 'ComponentInstanceNode', 'SystemNode',
+           'ComponentInstanceGroupNode', 'GroupNode', 'PortNode', 'ProvidedPortNode', 'NeededPortNode', 'PortGroupNode',
+           'ChoiceNode', 'ConnectionChoiceNode', 'SelectionChoiceNode', 'NopNode', 'ConnectorDegreeGroupingNode',
+           'ConnectorNode', 'EdgeType', 'AttributeNode', 'AttributeValueNode', 'InputParamNode',
+           'DesignVariableNode', 'MetricNode', 'FunctionDerivationNode', 'ConceptNode', 'MetricType',
+           'FunctionDecompositionNode', 'ExternalConnectionNode', 'ExternalOutConnectionNode', 'SystemGroupNode',
+           'EdgeTuple', 'NonFulfillmentNode', 'MultiFulfillmentNode'])}
+
+    def build_graph(self, G: DSGType) -> Any:
+        # noinspection PyTypeChecker
+        G_nx: nx.MultiDiGraph = G.graph
+        nodes = list(G_nx.nodes())
+        A = nx.to_numpy_array(G_nx, nodelist=nodes, weight="weight")
+        node_labels = {i: 0 for i in range(len(nodes))}
+        gk_graph = gk.Graph(A, node_labels=node_labels)
+        return gk_graph
+
+    def _get_node_label(self, node: Any) -> int:
+        cls_name = node.__class__.__name__
+        try:
+            return self._class_name_to_label[cls_name]
+        except KeyError as e:
+            raise ValueError(f"Unknown node class '{cls_name}' (not in __all__)") from e
+
+
+    def fit_transform(self, train_graphs: Sequence[Any]) -> Any:
+        K_train_train = self.kernel.fit_transform(train_graphs)
+        return K_train_train
+
+    def transform(self, test_graphs: Sequence[Any]) -> Any:
+        K_x_train = self.kernel.transform(test_graphs)
+        return K_x_train
