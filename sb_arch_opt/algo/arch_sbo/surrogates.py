@@ -161,13 +161,12 @@ class SimpleWLKernelBuilder(GraphKernelBuilder):
 class WLVHKernelBuilder(GraphKernelBuilder):
     def __init__(self):
         self.kernel = WeisfeilerLehman(n_iter=3, base_graph_kernel=VertexHistogram, normalize=True)
-        self._class_name_to_label = {name: i for i, name in enumerate(['ADSGNode', 'FunctionNode', 'ComponentNode', 'ComponentInstanceNode', 'SystemNode',
-           'ComponentInstanceGroupNode', 'GroupNode', 'PortNode', 'ProvidedPortNode', 'NeededPortNode', 'PortGroupNode',
-           'ChoiceNode', 'ConnectionChoiceNode', 'SelectionChoiceNode', 'NopNode', 'ConnectorDegreeGroupingNode',
-           'ConnectorNode', 'EdgeType', 'AttributeNode', 'AttributeValueNode', 'InputParamNode',
-           'DesignVariableNode', 'MetricNode', 'FunctionDerivationNode', 'ConceptNode', 'MetricType',
-           'FunctionDecompositionNode', 'ExternalConnectionNode', 'ExternalOutConnectionNode', 'SystemGroupNode',
-           'EdgeTuple', 'NonFulfillmentNode', 'MultiFulfillmentNode'])}
+        self._class_name_to_label = {name: i for i, name in enumerate(['FunctionNode', 'ComponentNode',
+            'ComponentInstanceNode', 'SystemNode', 'ComponentInstanceGroupNode', 'GroupNode', 'PortGroupNode',
+            'NopNode', 'ConnectorDegreeGroupingNode', 'ConnectorNode', 'AttributeNode', 'AttributeValueNode',
+            'InputParamNode', 'DesignVariableNode', 'MetricNode', 'FunctionDerivationNode', 'ConceptNode',
+            'FunctionDecompositionNode', 'ExternalConnectionNode', 'ExternalOutConnectionNode', 'SystemGroupNode',
+            'NonFulfillmentNode', 'MultiFulfillmentNode'])}
 
     def build_graph(self, G: DSGType) -> Any:
         # noinspection PyTypeChecker
