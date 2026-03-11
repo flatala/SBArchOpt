@@ -219,54 +219,6 @@ class ModelFactory:
 
         return surrogate, normalization
 
-    def get_md_graph_kernel_kriging_model(
-            self,
-            kernel_builder: GraphKernelBuilder,
-            multi: bool = True,
-            ignore_hierarchy: bool = False,
-            **kwargs_,
-    ) -> Tuple["SurrogateModel", "Normalization"]:
-        check_dependencies()
-
-        normalization = self.get_md_normalization()
-        design_space = self.problem.design_space
-        norm_ds_spec = self.create_smt_design_space_spec(
-            design_space, md_normalize=True, ignore_hierarchy=ignore_hierarchy
-        )
-
-        kwargs = dict(
-            print_global=False,
-            design_space=norm_ds_spec.design_space,
-            categorical_kernel=MixIntKernelType.GOWER,
-            hierarchical_kernel=MixHrcKernelType.ALG_KERNEL,
-        )
-
-        kwargs.update(kwargs_)
-        gp = self.problem.evaluator.translator.graph_processor
-
-        print("initializing the graph kernel surogate\n")
-        surrogate = GraphKernelKRG(
-            graph_processor=gp,
-            normalization=normalization,
-            kernel_builder=kernel_builder,
-            **kwargs,
-        )
-
-        if ignore_hierarchy:
-            surrogate.supports["x_hierarchy"] = False
-
-        print("GraphKernelKRG type:", type(surrogate))
-        print("is_continuous:", surrogate.is_continuous)
-        print("design_space type:", type(surrogate.design_space))
-        print("has categorical:", np.any(surrogate.design_space.is_cat_mask))
-        print("categorical_kernel:", surrogate.options["categorical_kernel"])
-        print("matrix_data_corr qualname:", surrogate._matrix_data_corr.__qualname__)
-
-        if multi:
-            surrogate = MultiSurrogateModel(surrogate)
-
-        return surrogate, normalization
-
     @staticmethod
     def get_n_theta(problem: ArchOptProblemBase, surrogate: 'SurrogateModel') -> int:
 

@@ -161,12 +161,10 @@ class SimpleWLKernelBuilder(GraphKernelBuilder):
 class WLVHKernelBuilder(GraphKernelBuilder):
     def __init__(self):
         self.kernel = WeisfeilerLehman(n_iter=3, base_graph_kernel=VertexHistogram, normalize=True)
-        self._class_name_to_label = {name: i for i, name in enumerate(['FunctionNode', 'ComponentNode',
-            'ComponentInstanceNode', 'SystemNode', 'ComponentInstanceGroupNode', 'GroupNode', 'PortGroupNode',
-            'NopNode', 'ConnectorDegreeGroupingNode', 'ConnectorNode', 'AttributeNode', 'AttributeValueNode',
-            'InputParamNode', 'DesignVariableNode', 'MetricNode', 'FunctionDerivationNode', 'ConceptNode',
-            'FunctionDecompositionNode', 'ExternalConnectionNode', 'ExternalOutConnectionNode', 'SystemGroupNode',
-            'NonFulfillmentNode', 'MultiFulfillmentNode'])}
+        self._class_name_to_label = {
+            'EXT': 1,
+            'EXT_OUT': 2,
+        }
 
     def build_graph(self, G: DSGType) -> Any:
         # noinspection PyTypeChecker
@@ -178,11 +176,11 @@ class WLVHKernelBuilder(GraphKernelBuilder):
         return gk_graph
 
     def _get_node_label(self, node: Any) -> int:
-        cls_name = node.__class__.__name__
+        node_type = str(node)
         try:
-            return self._class_name_to_label[cls_name]
+            return self._class_name_to_label[node_type]
         except KeyError as e:
-            raise ValueError(f"Unknown node class '{cls_name}' (not in __all__)") from e
+            raise ValueError(f"Unknown node class '{node_type}' (not in __all__)") from e
 
 
     def fit_transform(self, train_graphs: Sequence[Any]) -> Any:
