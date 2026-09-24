@@ -60,6 +60,7 @@ if __name__ == '__main__':
             'ConfigSpace>=1.2.1',
             'more-itertools>=9.1',
             'appdirs',
+            'networkx',
         ],
         extras_require={
             'arch_sbo': [

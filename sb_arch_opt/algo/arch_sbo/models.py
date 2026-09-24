@@ -216,6 +216,42 @@ class ModelFactory:
 
         return surrogate, normalization
 
+    def get_graph_kriging_model(self, decoder, kernel, multi=True, ignore_hierarchy=False,
+                                use_kernel_theta0=True, **kwargs_):
+        """Create a mixed-discrete kriging model using neutral graph representations."""
+        check_dependencies()
+        from sb_arch_opt.algo.arch_sbo.graph.surrogate import GraphKriging
+
+        normalization = self.get_md_normalization()
+        norm_ds_spec = self.create_smt_design_space_spec(
+            self.problem.design_space,
+            md_normalize=True,
+            ignore_hierarchy=ignore_hierarchy,
+        )
+        kwargs = dict(
+            design_space=norm_ds_spec.design_space,
+            categorical_kernel=MixIntKernelType.GOWER,
+            hierarchical_kernel=MixHrcKernelType.ALG_KERNEL,
+            print_global=False,
+            print_training=False,
+            print_prediction=False,
+            print_problem=False,
+            print_solver=False,
+        )
+        kwargs.update(kwargs_)
+        surrogate = GraphKriging(
+            decoder=decoder,
+            kernel=kernel,
+            normalization=normalization,
+            use_kernel_theta0=use_kernel_theta0,
+            **kwargs,
+        )
+        if ignore_hierarchy:
+            surrogate.supports['x_hierarchy'] = False
+        if multi:
+            surrogate = MultiSurrogateModel(surrogate)
+        return surrogate, normalization
+
     @staticmethod
     def get_n_theta(problem: ArchOptProblemBase, surrogate: 'SurrogateModel') -> int:
 
