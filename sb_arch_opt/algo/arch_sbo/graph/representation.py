@@ -37,9 +37,10 @@ __all__ = ["NodeLabeling", "SizingFeature", "GraphRepresentation", "GraphDecoder
 class NodeLabeling:
     """A named rule for labeling nodes of a domain graph.
 
-    :param key: Stable identity used to match a decoder's labels with a kernel.
-    :param function: Maps a domain node to a hashable label. The decoder applies
-        it when building each graph representation.
+    :param key: Identifier used to match labels from a decoder with a kernel.
+        Use a different key when the meaning of the labels changes.
+    :param function: Maps a source-graph node to a hashable label. A decoder
+        can call it when building each graph representation.
     """
 
     key: str
@@ -54,8 +55,8 @@ class SizingFeature:
     """Description of one sizing coordinate exported by a graph decoder.
 
     :param name: Human-readable name of the coordinate.
-    :param kind: ``numeric`` uses value differences in a sizing kernel;
-        ``categorical`` uses equality instead.
+    :param kind: ``numeric`` compares the difference between values;
+        ``categorical`` only checks whether values match.
     """
 
     name: str
@@ -71,13 +72,13 @@ class GraphRepresentation:
     """Kernel inputs for one decoded design, independent of its source domain.
 
     :param graph: NetworkX graph whose nodes and edges describe the design.
-    :param node_labels: For each labeling, a mapping from every graph node to
-        its hashable label.
+    :param node_labels: For each labeling declared by the decoder, a mapping
+        from every node in ``graph`` to its hashable label.
     :param sizing_values: One-dimensional array with one value per decoder
         sizing feature, in the order of ``GraphDecoder.sizing_features``.
 
-    Treat the graph, mappings, and array as immutable after decoding: kernels
-    may cache features derived from them.
+    Do not change the graph, labels, or sizing values after decoding. Kernels
+    may reuse values computed from them.
     """
 
     graph: nx.Graph

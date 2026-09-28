@@ -56,14 +56,15 @@ class ThetaParameter(NamedTuple):
 
 
 class GraphKernel(ABC):
-    """Kernel interface over neutral graph representations.
+    """Compare decoded graphs for a graph surrogate.
 
-    ``theta`` follows the order returned by ``get_theta_parameters``. A kernel
-    can store training state in ``fit_transform`` for later ``transform`` calls.
+    Values in ``theta`` follow the order from ``get_theta_parameters``.
+    ``fit_transform`` sets the training graphs that later ``transform`` calls
+    compare against.
     """
 
     def get_theta_parameters(self) -> Sequence[ThetaParameter]:
-        """Describe tunable parameters in the order expected by ``theta``."""
+        """Describe tunable parameters in the order used by ``theta``."""
         return ()
 
     @abstractmethod
