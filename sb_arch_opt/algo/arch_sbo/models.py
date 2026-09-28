@@ -217,7 +217,7 @@ class ModelFactory:
         return surrogate, normalization
 
     def get_graph_kriging_model(self, decoder, kernel, multi=True, ignore_hierarchy=False,
-                                use_kernel_theta0=True, **kwargs_):
+                                **kwargs_):
         """Create a mixed-discrete kriging model using neutral graph representations."""
         check_dependencies()
         from sb_arch_opt.algo.arch_sbo.graph.surrogate import GraphKriging
@@ -243,7 +243,6 @@ class ModelFactory:
             decoder=decoder,
             kernel=kernel,
             normalization=normalization,
-            use_kernel_theta0=use_kernel_theta0,
             **kwargs,
         )
         if ignore_hierarchy:
@@ -440,9 +439,6 @@ class MultiSurrogateModel(SurrogateModel):
                 model.options['theta0'] = theta0
 
             model.train()
-
-            # rmse = np.linalg.norm(self.yt[:, i] - model.predict_values(self.xt)[:, 0], 2)
-            # print(f'TRAINED {i}: {rmse:.3g}')
 
             if i == 0 and isinstance(model, KrgBased):
                 try:

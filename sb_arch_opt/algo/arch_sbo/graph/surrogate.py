@@ -26,14 +26,13 @@ class GraphKriging(KrgBased):
         decoder: GraphDecoder,
         kernel: GraphKernel,
         normalization: Optional[Normalization] = None,
-        use_kernel_theta0: bool = True,
         **kwargs,
     ):
+        kwargs.setdefault("hyper_opt", "Cobyla")
         super().__init__(**kwargs)
         self.decoder = decoder
         self.kernel = kernel
         self.normalization = normalization
-        self.use_kernel_theta0 = use_kernel_theta0
 
         self._representations_by_x: Dict[Tuple[float, ...], GraphRepresentation] = {}
         self._train_kernel_matrix: Optional[np.ndarray] = None
@@ -69,9 +68,7 @@ class GraphKriging(KrgBased):
         if not parameters:
             parameters = (ThetaParameter(0.01, 100.0, "linear", 1.0),)
         theta0 = np.asarray([parameter.initial for parameter in parameters], dtype=float)
-        if not self.use_kernel_theta0:
-            theta0[:] = requested_theta0[0]
-        elif requested_theta0.size > 1:
+        if requested_theta0.size > 1:
             if requested_theta0.size != theta0.size:
                 raise ValueError(
                     f"GraphKriging expects theta0 with 1 or {theta0.size} values, "
@@ -139,6 +136,10 @@ class GraphKriging(KrgBased):
         del use_multistart, limit
         self.D = D
 
+        if self.options["hyper_opt"] not in {"Cobyla", "NoOp"}:
+            raise ValueError("GraphKriging supports hyper_opt='Cobyla' or 'NoOp'")
+        if self._eval_noise:
+            raise NotImplementedError("GraphKriging does not optimize the noise level")
         no_optimization = self.options["hyper_opt"] == "NoOp"
         self.noise0 = np.array(self.options["noise0"] if no_optimization else self._noise0)
         theta0 = np.asarray(self.options["theta0"], dtype=float).ravel()

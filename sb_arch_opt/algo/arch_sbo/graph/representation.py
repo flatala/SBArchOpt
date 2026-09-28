@@ -12,7 +12,7 @@ __all__ = ["NodeLabeling", "SizingFeature", "GraphRepresentation", "GraphDecoder
 
 @dataclass(frozen=True)
 class NodeLabeling:
-    """One named way of labeling nodes."""
+    """One named way of labeling nodes; the key defines its identity."""
 
     key: str
     function: Callable[[Any], Hashable] = field(compare=False, hash=False, repr=False)
@@ -35,7 +35,10 @@ def _empty_float_array() -> np.ndarray:
 
 @dataclass(frozen=True)
 class GraphRepresentation:
-    """Neutral graph, node labels, and sizing values used by graph kernels."""
+    """Neutral graph, node labels, and sizing values used by graph kernels.
+
+    Treat the contained graph, mappings, and array as immutable after decoding.
+    """
 
     graph: nx.Graph
     node_labels: Mapping[NodeLabeling, Mapping[Hashable, Hashable]]

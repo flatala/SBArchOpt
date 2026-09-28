@@ -1,8 +1,7 @@
 """Domain-independent kernels for graph surrogate models."""
 
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
-import copy
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 import math
@@ -58,6 +57,73 @@ class _WLFeatures:
     counts: Tuple[Tuple[Counter, ...], ...]
 
 
+@dataclass(frozen=True)
+class _WLTrainingSnapshot:
+    features: Tuple[_WLFeatures, ...]
+    level_kernels: Tuple[Tuple[np.ndarray, ...], ...]
+
+
+def _wl_features(structure_key, cutoff: int, intern) -> _WLFeatures:
+    """Compute WL counts using compact labels shared across kernel copies."""
+    labelings, neighbors = structure_key
+    counts_by_labeling = []
+    for labeling_index, raw_labels in enumerate(labelings):
+        current = tuple(intern(("base", labeling_index, label)) for label in raw_labels)
+        counts_by_level = []
+        for level in range(cutoff + 1):
+            counts_by_level.append(Counter(current))
+            if level < cutoff:
+                current = tuple(
+                    intern((
+                        "wl",
+                        current[index],
+                        tuple(sorted(current[neighbor] for neighbor in adjacent)),
+                    ))
+                    for index, adjacent in enumerate(neighbors)
+                )
+        counts_by_labeling.append(tuple(counts_by_level))
+    return _WLFeatures(tuple(counts_by_labeling))
+
+
+class _WLCache:
+    """Shared by copies of one kernel; training data is never LRU-evicted."""
+
+    def __init__(self, cache_size: Optional[int]):
+        self.cache_size = cache_size
+        self._label_ids = {}
+        self.training_features = {}
+        self.candidate_features = OrderedDict()
+        self.training_snapshot: Optional[_WLTrainingSnapshot] = None
+
+    def __deepcopy__(self, memo):
+        memo[id(self)] = self
+        return self
+
+    def _intern(self, label) -> int:
+        if label not in self._label_ids:
+            self._label_ids[label] = len(self._label_ids)
+        return self._label_ids[label]
+
+    def features(self, structure_key, cutoff: int, training: bool) -> _WLFeatures:
+        key = (cutoff, structure_key)
+        features = self.training_features.get(key)
+        if features is not None:
+            return features
+
+        features = self.candidate_features.get(key)
+        if features is None:
+            features = _wl_features(structure_key, cutoff, self._intern)
+        if training:
+            self.training_features[key] = features
+            self.candidate_features.pop(key, None)
+        else:
+            self.candidate_features[key] = features
+            self.candidate_features.move_to_end(key)
+            if self.cache_size is not None and len(self.candidate_features) > self.cache_size:
+                self.candidate_features.popitem(last=False)
+        return features
+
+
 def _same_objects(left, right):
     return (
         left is not None
@@ -68,19 +134,31 @@ def _same_objects(left, right):
 
 
 class LdWloa(GraphKernel):
-    """Learned-depth WLOA over one or more node labelings."""
+    """Learned-depth WLOA over one or more node labelings.
 
-    def __init__(self, cutoff: int, labelings: Sequence[NodeLabeling]):
+    Copies share theta-independent WL features and the latest training matrices.
+    ``cache_size`` limits transient candidate graphs; ``None`` disables eviction.
+    Training graph features are retained regardless of this limit.
+    """
+
+    def __init__(
+        self,
+        cutoff: int,
+        labelings: Sequence[NodeLabeling],
+        cache_size: Optional[int] = 8192,
+    ):
         if cutoff < 0:
             raise ValueError("cutoff must be non-negative")
         if len(labelings) == 0:
             raise ValueError("at least one node labeling is required")
+        if len({labeling.key for labeling in labelings}) != len(labelings):
+            raise ValueError("node labeling keys must be unique")
+        if cache_size is not None and cache_size < 0:
+            raise ValueError("cache_size must be non-negative or None")
 
         self.cutoff = cutoff
         self.labelings = tuple(labelings)
-        self._label_to_id: Dict[Hashable, int] = {}
-        self._feature_cache = {}
-        self._representation_feature_cache = {}
+        self._cache = _WLCache(cache_size)
         self._train_features: Optional[Tuple[_WLFeatures, ...]] = None
         self._train_level_kernels = None
         self._train_counts = None
@@ -88,15 +166,9 @@ class LdWloa(GraphKernel):
         self._transform_level_kernels = None
         self._transform_counts = None
 
-    def __deepcopy__(self, memo):
-        copied = self.__class__.__new__(self.__class__)
-        memo[id(self)] = copied
-        for key, value in self.__dict__.items():
-            if key in {"_feature_cache", "_label_to_id"}:
-                setattr(copied, key, value)
-            else:
-                setattr(copied, key, copy.deepcopy(value, memo))
-        return copied
+    @property
+    def cache_size(self) -> Optional[int]:
+        return self._cache.cache_size
 
     def get_theta_parameters(self) -> Sequence[ThetaParameter]:
         depth = [ThetaParameter(0.0, 1.0, "linear", 0.5)] * (self.cutoff + 1)
@@ -107,7 +179,7 @@ class LdWloa(GraphKernel):
         return depth + mixture
 
     def fit_transform(self, graphs, theta=None):
-        features = tuple(self._build_features(graph) for graph in graphs)
+        features = tuple(self._build_features(graph, training=True) for graph in graphs)
         counts = self._counts_by_labeling(features)
         self._train_level_kernels = self._train_kernels(features, counts)
         self._train_features = features
@@ -146,16 +218,9 @@ class LdWloa(GraphKernel):
             theta,
         )
 
-    def _label_id(self, label: Hashable) -> int:
-        if label not in self._label_to_id:
-            self._label_to_id[label] = len(self._label_to_id)
-        return self._label_to_id[label]
-
-    def _build_features(self, representation: GraphRepresentation) -> _WLFeatures:
-        cached = self._representation_feature_cache.get(id(representation))
-        if cached is not None and cached[0] is representation:
-            return cached[1]
-
+    def _build_features(
+        self, representation: GraphRepresentation, training: bool = False
+    ) -> _WLFeatures:
         graph = representation.graph
         nodes = tuple(graph.nodes)
         if graph.is_directed():
@@ -177,34 +242,7 @@ class LdWloa(GraphKernel):
                 for node in nodes
             ),
         )
-        features = self._feature_cache.get(structure_key)
-        if features is not None:
-            self._representation_feature_cache[id(representation)] = (representation, features)
-            return features
-
-        counts_by_labeling = []
-        for labeling in self.labelings:
-            raw_labels = representation.node_labels[labeling]
-            current = {
-                node: self._label_id((labeling.key, raw_labels[node]))
-                for node in nodes
-            }
-            counts_by_level = []
-            for level in range(self.cutoff + 1):
-                counts_by_level.append(Counter(current.values()))
-                if level < self.cutoff:
-                    current = {
-                        node: self._label_id(
-                            (current[node], tuple(sorted(current[neighbor] for neighbor in neighbors[node])))
-                        )
-                        for node in nodes
-                    }
-            counts_by_labeling.append(tuple(counts_by_level))
-
-        features = _WLFeatures(tuple(counts_by_labeling))
-        self._feature_cache[structure_key] = features
-        self._representation_feature_cache[id(representation)] = (representation, features)
-        return features
+        return self._cache.features(structure_key, self.cutoff, training)
 
     def _combine_kernels(self, level_kernels, left_counts, right_counts, theta):
         depth_weights, labeling_weights = self._theta_parts(theta)
@@ -260,39 +298,47 @@ class LdWloa(GraphKernel):
         )
 
     def _train_kernels(self, features, counts):
-        old_features = self._train_features
-        if _same_objects(features, old_features):
+        if _same_objects(features, self._train_features):
             return self._train_level_kernels
+
+        snapshot = self._cache.training_snapshot
+        old_features = snapshot.features if snapshot is not None else None
+        old_kernels = snapshot.level_kernels if snapshot is not None else None
+        if _same_objects(features, old_features):
+            return old_kernels
 
         old_count = len(old_features) if old_features is not None else 0
         grows_previous_train = (
             old_count < len(features)
             and _same_objects(features[:old_count], old_features)
-            and self._train_level_kernels is not None
+            and old_kernels is not None
         )
         if not grows_previous_train:
-            return tuple(
+            kernels = tuple(
                 tuple(self._kernel_matrix_for_level(level, level) for level in by_level)
                 for by_level in counts
             )
+        else:
+            extended = []
+            for labeling_index, by_level in enumerate(counts):
+                labeling_kernels = []
+                for level, level_counts in enumerate(by_level):
+                    old_kernel = old_kernels[labeling_index][level]
+                    old_counts = level_counts[:old_count]
+                    new_counts = level_counts[old_count:]
+                    new_old = self._kernel_matrix_for_level(new_counts, old_counts)
+                    new_new = self._kernel_matrix_for_level(new_counts, new_counts)
+                    kernel = np.empty((len(features), len(features)), dtype=float)
+                    kernel[:old_count, :old_count] = old_kernel
+                    kernel[old_count:, :old_count] = new_old
+                    kernel[:old_count, old_count:] = new_old.T
+                    kernel[old_count:, old_count:] = new_new
+                    labeling_kernels.append(kernel)
+                extended.append(tuple(labeling_kernels))
+            kernels = tuple(extended)
 
-        kernels = []
-        for labeling_index, by_level in enumerate(counts):
-            labeling_kernels = []
-            for level, level_counts in enumerate(by_level):
-                old_kernel = self._train_level_kernels[labeling_index][level]
-                old_counts = level_counts[:old_count]
-                new_counts = level_counts[old_count:]
-                new_old = self._kernel_matrix_for_level(new_counts, old_counts)
-                new_new = self._kernel_matrix_for_level(new_counts, new_counts)
-                kernel = np.empty((len(features), len(features)), dtype=float)
-                kernel[:old_count, :old_count] = old_kernel
-                kernel[old_count:, :old_count] = new_old
-                kernel[:old_count, old_count:] = new_old.T
-                kernel[old_count:, old_count:] = new_new
-                labeling_kernels.append(kernel)
-            kernels.append(tuple(labeling_kernels))
-        return tuple(kernels)
+        self._cache.training_snapshot = _WLTrainingSnapshot(features, kernels)
+        return kernels
 
     def _clear_transform_cache(self):
         self._transform_features = None
@@ -368,6 +414,8 @@ class SizingKernel(GraphKernel):
     ):
         if len(features) == 0:
             raise ValueError("at least one sizing feature is required")
+        if not 0.0 < power <= 2.0:
+            raise ValueError("sizing power must be in (0, 2]")
         self.features = tuple(features)
         self.power = power
         self._numeric = np.array([feature.kind == "numeric" for feature in features])
@@ -449,6 +497,8 @@ class SizingKernel(GraphKernel):
         if theta is None:
             theta = [parameter.initial for parameter in self.get_theta_parameters()]
         theta = np.asarray(theta, dtype=float).ravel()
+        if theta.size != len(self.features):
+            raise ValueError(f"SizingKernel theta size must be {len(self.features)}, got {theta.size}")
         return np.exp(-np.tensordot(powered_distances, theta, axes=([-1], [0])))
 
     def _clear_transform_cache(self):
@@ -545,7 +595,13 @@ class EdgeMultiplicityKernel(GraphKernel):
         return distances
 
     def _kernel(self, distances, theta):
-        gamma = self.gamma0 if theta is None else float(np.asarray(theta).ravel()[0])
+        if theta is None:
+            gamma = self.gamma0
+        else:
+            theta = np.asarray(theta, dtype=float).ravel()
+            if theta.size != 1:
+                raise ValueError(f"EdgeMultiplicityKernel theta size must be 1, got {theta.size}")
+            gamma = float(theta[0])
         return np.exp(-gamma * distances)
 
     def _clear_transform_cache(self):
@@ -559,6 +615,8 @@ class CompositeGraphKernel(GraphKernel):
     def __init__(self, branches: Sequence[GraphKernel], composition: str = "additive"):
         if len(branches) == 0:
             raise ValueError("at least one kernel branch is required")
+        if composition not in {"additive", "additive_interaction", "multiplicative"}:
+            raise ValueError(f"unsupported graph kernel composition: {composition!r}")
         self.branches = tuple(branches)
         self.composition = composition
 
@@ -601,6 +659,10 @@ class CompositeGraphKernel(GraphKernel):
         if theta is None:
             theta = [parameter.initial for parameter in parameters]
         theta = np.asarray(theta, dtype=float).ravel()
+        if theta.size != len(parameters):
+            raise ValueError(
+                f"CompositeGraphKernel theta size must be {len(parameters)}, got {theta.size}"
+            )
 
         cursor = 0
         weights = None
