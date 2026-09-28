@@ -1,4 +1,27 @@
-"""Domain-independent graph representations used by graph surrogates."""
+"""
+MIT License
+
+Copyright: (c) 2026, Deutsches Zentrum fuer Luft- und Raumfahrt e.V.
+Contact: jasper.bussemaker@dlr.de
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Hashable, Literal, Mapping, Protocol, Sequence, runtime_checkable
@@ -12,7 +35,12 @@ __all__ = ["NodeLabeling", "SizingFeature", "GraphRepresentation", "GraphDecoder
 
 @dataclass(frozen=True)
 class NodeLabeling:
-    """One named way of labeling nodes; the key defines its identity."""
+    """A named rule for labeling nodes of a domain graph.
+
+    :param key: Stable identity used to match a decoder's labels with a kernel.
+    :param function: Maps a domain node to a hashable label. The decoder applies
+        it when building each graph representation.
+    """
 
     key: str
     function: Callable[[Any], Hashable] = field(compare=False, hash=False, repr=False)
@@ -23,7 +51,12 @@ class NodeLabeling:
 
 @dataclass(frozen=True)
 class SizingFeature:
-    """One normalized sizing coordinate exported by a graph decoder."""
+    """Description of one sizing coordinate exported by a graph decoder.
+
+    :param name: Human-readable name of the coordinate.
+    :param kind: ``numeric`` uses value differences in a sizing kernel;
+        ``categorical`` uses equality instead.
+    """
 
     name: str
     kind: Literal["numeric", "categorical"]
@@ -35,9 +68,16 @@ def _empty_float_array() -> np.ndarray:
 
 @dataclass(frozen=True)
 class GraphRepresentation:
-    """Neutral graph, node labels, and sizing values used by graph kernels.
+    """Kernel inputs for one decoded design, independent of its source domain.
 
-    Treat the contained graph, mappings, and array as immutable after decoding.
+    :param graph: NetworkX graph whose nodes and edges describe the design.
+    :param node_labels: For each labeling, a mapping from every graph node to
+        its hashable label.
+    :param sizing_values: One-dimensional array with one value per decoder
+        sizing feature, in the order of ``GraphDecoder.sizing_features``.
+
+    Treat the graph, mappings, and array as immutable after decoding: kernels
+    may cache features derived from them.
     """
 
     graph: nx.Graph
@@ -47,15 +87,25 @@ class GraphRepresentation:
 
 @runtime_checkable
 class GraphDecoder(Protocol):
-    """Converts design vectors into neutral graph representations."""
+    """Domain adapter that converts design vectors into graph-kernel inputs.
+
+    Implement this protocol for a new design space. Its labelings and sizing
+    features describe the data present in every representation it returns.
+    """
 
     @property
     def labelings(self) -> Sequence[NodeLabeling]:
+        """Labeling rules available in every decoded representation."""
         ...
 
     @property
     def sizing_features(self) -> Sequence[SizingFeature]:
+        """Sizing coordinates, in the order used by ``sizing_values``."""
         ...
 
     def decode(self, x: np.ndarray) -> Sequence[GraphRepresentation]:
+        """Return one representation per row of ``x``, in the same order.
+
+        :param x: Design vectors with shape ``(n_designs, n_variables)``.
+        """
         ...

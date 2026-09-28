@@ -1,4 +1,27 @@
-"""Domain-independent kernels for graph surrogate models."""
+"""
+MIT License
+
+Copyright: (c) 2026, Deutsches Zentrum fuer Luft- und Raumfahrt e.V.
+Contact: jasper.bussemaker@dlr.de
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
 
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict, defaultdict
@@ -24,6 +47,8 @@ __all__ = [
 
 
 class ThetaParameter(NamedTuple):
+    """Bounds, optimizer scale, and initial value of one kernel parameter."""
+
     lower: float
     upper: float
     scale: str
@@ -31,8 +56,14 @@ class ThetaParameter(NamedTuple):
 
 
 class GraphKernel(ABC):
+    """Kernel interface over neutral graph representations.
+
+    ``theta`` follows the order returned by ``get_theta_parameters``. A kernel
+    can store training state in ``fit_transform`` for later ``transform`` calls.
+    """
 
     def get_theta_parameters(self) -> Sequence[ThetaParameter]:
+        """Describe tunable parameters in the order expected by ``theta``."""
         return ()
 
     @abstractmethod
@@ -41,6 +72,12 @@ class GraphKernel(ABC):
         graphs: Sequence[GraphRepresentation],
         theta: Optional[np.ndarray] = None,
     ) -> np.ndarray:
+        """Fit on training graphs and return their square kernel matrix.
+
+        :param graphs: Training representations; rows and columns follow this order.
+        :param theta: Kernel parameters, or ``None`` for implementation defaults.
+        :return: Matrix with shape ``(n_train, n_train)``.
+        """
         pass
 
     @abstractmethod
@@ -49,6 +86,12 @@ class GraphKernel(ABC):
         graphs: Sequence[GraphRepresentation],
         theta: Optional[np.ndarray] = None,
     ) -> np.ndarray:
+        """Compare new graphs with the graphs from the last ``fit_transform``.
+
+        :param graphs: New representations, in matrix-row order.
+        :param theta: Kernel parameters, or ``None`` for implementation defaults.
+        :return: Matrix with shape ``(n_new, n_train)``.
+        """
         pass
 
 
